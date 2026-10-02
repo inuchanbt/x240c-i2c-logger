@@ -2,7 +2,7 @@
 
 English | [日本語](README.ja.md)
 
-A Python logger and decoder for PowerPi X240C I2C traffic. Current version: **0.4.4**.
+A Python logger and decoder for PowerPi X240C I2C traffic. Current version: **0.4.5**.
 It accepts PicoXTools WebSocket streams, saved text logs, or serial output from an RP2040 PIO sniffer, and records register operations, OTG voltage settings, and estimated current limits to CSV.
 
 ## Hardware
@@ -41,6 +41,18 @@ The examples use the Windows `py` launcher. On other systems, substitute your Py
 py x240c_i2c_logger.py --picotools
 py x240c_i2c_logger.py --picotools 192.168.33.1
 ```
+
+The logger automatically enables **I2C Sniffer** through the device's HTTP setup API before opening the WebSocket. You no longer need to open the I2C settings page first. Connect **SCL to GPIO9** and **SDA to GPIO8**, with a common ground.
+The setup API must be reachable at `http://<host>/api/setup?type=i2c` (HTTPS for a `wss://` URL). This follows the web UI shipped in PicoXTools 3.3.1; other firmware versions may differ. Setup failures stop the capture with an error.
+
+To use an existing device configuration or firmware requiring manual setup:
+
+```powershell
+py x240c_i2c_logger.py --picotools --no-picotools-setup
+```
+
+Automatic setup selects Sniffer mode and may stop an active SPI Sniffer, as in the device's web UI. The logger leaves I2C Sniffer enabled when it exits; use the web UI to close it if needed.
+For protocol details and verification limits, see [PicoXTools automatic setup](docs/picotools-auto-setup.md).
 
 The default host is `192.168.33.1`. On Windows, you can also launch `run_picotools.bat`.
 To specify another host and additional options, use `run_picotools.bat 192.168.33.2 --ws-debug`.
@@ -86,6 +98,7 @@ A physical transaction containing repeated STARTs may contain multiple logical o
 | `--set-tail-lead-ms 250` | Window for associating a current write immediately before DCDC disable (ms) |
 | `--addr 0x6C` | Target 7-bit I2C address |
 | `--rsense-mohm 10` | Effective sense resistance used for current estimation (mΩ) |
+| `--no-picotools-setup` | Skip automatic Sniffer setup and use the existing configuration |
 | `--ws-debug` | Display binary WebSocket messages |
 | `--append` | Append to existing CSV files |
 | `--quiet` | Suppress decoded console output |
@@ -124,8 +137,11 @@ Run the SET aggregation regression tests without external hardware:
 
 ```powershell
 py tests/test_v044.py
+py tests/test_picotools_setup.py
 py x240c_i2c_logger.py --help
 ```
+
+The setup tests use a local HTTP server and simulated WebSocket data to check startup order, failure handling, and manual-setup mode. Hardware capture still needs verification on the connected device.
 
 The regression tests cover SET boundaries across repeated STARTs, prevention of incorrect current association across separate transactions, and aggregation of delayed DCDC-related operations.
 

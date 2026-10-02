@@ -2,7 +2,7 @@
 
 [English](README.md) | 日本語
 
-PowerPi X240C の I2C 通信を記録・解析する Python 製ロガーです。現在のバージョンは **0.4.4** です。
+PowerPi X240C の I2C 通信を記録・解析する Python 製ロガーです。現在のバージョンは **0.4.5** です。
 PicoXTools の WebSocket、保存済みのテキストログ、RP2040 PIO スニファーのシリアル出力を入力として、レジスタ操作や OTG 電圧・推定電流を CSV に保存します。
 
 ## ハードウェアの入手先
@@ -41,6 +41,18 @@ py -m pip install -r requirements.txt
 py x240c_i2c_logger.py --picotools
 py x240c_i2c_logger.py --picotools 192.168.33.1
 ```
+
+ロガー起動時に、機器のHTTP設定APIで **I2C Snifferを自動的に有効化**してからWebSocketへ接続します。先にI2C設定画面を開く操作は不要です。**SCL＝GPIO9／SDA＝GPIO8** に接続し、GNDを共通にしてください。
+設定APIは `http://<host>/api/setup?type=i2c`（`wss://` 指定時はHTTPS）です。PicoXTools 3.3.1に同梱されたWeb画面の処理に合わせています。他のファームウェアでは異なる可能性があります。設定に失敗した場合はエラーを表示して終了します。
+
+機器の既存設定を使う場合や、手動設定が必要なファームウェアでは、次のように自動設定を無効化できます。
+
+```powershell
+py x240c_i2c_logger.py --picotools --no-picotools-setup
+```
+
+自動設定はSnifferモードを選択するため、Web画面と同じく実行中のSPI Snifferを停止する場合があります。ロガー終了後もI2C Snifferは有効のままです。必要に応じてWeb画面から閉じてください。
+設定APIと確認範囲の詳細は [PicoXTools自動設定の技術メモ（英語）](docs/picotools-auto-setup.md) を参照してください。
 
 ホスト省略時は `192.168.33.1` に接続します。Windows では `run_picotools.bat` からも起動できます。
 別のホストや追加オプションを指定する例は `run_picotools.bat 192.168.33.2 --ws-debug` です。
@@ -85,6 +97,7 @@ repeated START を含む物理トランザクションは複数の論理操作�
 | `--set-tail-lead-ms 250` | DCDC 無効化直前の電流設定を関連付ける時間（ms） |
 | `--addr 0x6C` | 対象の 7 ビット I2C アドレス |
 | `--rsense-mohm 10` | 電流推定に使う実効センス抵抗（mΩ） |
+| `--no-picotools-setup` | Snifferの自動設定を省略し、機器の既存設定を使用 |
 | `--ws-debug` | WebSocket のバイナリメッセージを表示 |
 | `--append` | 既存 CSV に追記 |
 | `--quiet` | 解析結果のコンソール表示を抑制 |
@@ -123,8 +136,11 @@ x240c-i2c-logger/
 
 ```powershell
 py tests/test_v044.py
+py tests/test_picotools_setup.py
 py x240c_i2c_logger.py --help
 ```
+
+自動設定テストはローカルHTTPサーバーと模擬WebSocketデータを使い、開始順序、エラー処理、手動設定モードを確認します。接続した実機でのキャプチャ確認は別途必要です。
 
 回帰テストでは repeated START の SET 境界、別トランザクションの電流の誤結合防止、遅延した DCDC 関連操作の集計を確認します。
 

@@ -3,7 +3,8 @@
 x240c_i2c_logger.py
 PowerPi X240C I2C sniffer logger / decoder
 
-v0.4.4
+v0.4.5
+- Automatically enable PicoXTools I2C Sniffer before receiving data
 - Direct PicoXTools WebSocket input:
       ws://<host>/ws/i2c
 - PicoXTools binary stream decoder (experimentally derived)
@@ -82,6 +83,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import re
 import struct
 import sys
@@ -90,9 +92,12 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, Request, build_opener
 
 
-VERSION = "0.4.4"
+VERSION = "0.4.5"
 DEFAULT_ADDR = 0x6C
 
 TIME_RE = re.compile(r"^\d{1,2}:\d{2}:\d{2}\.\d{3,6}$")
@@ -509,7 +514,59 @@ def parse_picotools_ws_message(
     return frames
 
 
-def iter_picotools_frames(host: str, timeout: float, debug: bool) -> Iterator[Frame]:
+def picotools_urls(host: str) -> tuple[str, str]:
+    """Return the capture URL and HTTP origin for the same device."""
+    if host.startswith(("ws://", "wss://")):
+        url = host
+    else:
+        url = f"ws://{host.rstrip('/')}/ws/i2c"
+    parsed = urlsplit(url)
+    if not parsed.hostname:
+        raise RuntimeError("Invalid PicoXTools host or WebSocket URL.")
+    scheme = "https" if parsed.scheme == "wss" else "http"
+    return url, f"{scheme}://{parsed.netloc}"
+
+
+def start_picotools_sniffer(origin: str, timeout: float, debug: bool = False) -> None:
+    """Use the same setup request as PicoXTools' I2C Sniffer web UI."""
+    url = f"{origin}/api/setup?type=i2c"
+    config = {
+        "clk_pin": 9,
+        "sda_pin": 8,
+        "clock": 100000,
+        "i2c_type": 2,
+        "slave_addr": 49,
+    }
+    request = Request(
+        url,
+        data=json.dumps(config).encode("utf-8"),
+        headers={"Content-Type": "text/plain;charset=UTF-8", "Accept": "application/json"},
+        method="POST",
+    )
+    print("# Enabling PicoXTools I2C Sniffer (SCL=GPIO9, SDA=GPIO8)...", file=sys.stderr)
+    try:
+        # The USB-connected device should bypass system HTTP proxies.
+        with build_opener(ProxyHandler({})).open(request, timeout=max(timeout, 5.0)) as response:
+            result = json.loads(response.read().decode("utf-8-sig"))
+        if debug:
+            print(f"HTTP<SETUP {result!r}", file=sys.stderr)
+        code = result.get("result") if isinstance(result, dict) else None
+        if type(code) not in (int, float) or not code >= 0:
+            raise ValueError(f"unexpected setup response: {result!r}")
+    except (OSError, URLError, HTTPError, ValueError) as exc:
+        raise RuntimeError(
+            f"Could not enable PicoXTools I2C Sniffer at {url}: {exc}. "
+            "Check the device connection. If this firmware requires manual setup, "
+            "enable Sniffer in the web UI and use --no-picotools-setup."
+        ) from exc
+    if result.get("sniffer") == 1:
+        print("# PicoXTools reports that SPI Sniffer was stopped.", file=sys.stderr)
+    print("# PicoXTools I2C Sniffer enabled.", file=sys.stderr)
+
+
+def iter_picotools_frames(
+    host: str, timeout: float, debug: bool, auto_setup: bool = True,
+) -> Iterator[Frame]:
     try:
         import websocket
     except ImportError as exc:
@@ -518,14 +575,9 @@ def iter_picotools_frames(host: str, timeout: float, debug: bool) -> Iterator[Fr
             "py -m pip install websocket-client"
         ) from exc
 
-    if host.startswith("ws://") or host.startswith("wss://"):
-        url = host
-        bare_host = re.sub(r"^wss?://", "", host).split("/", 1)[0]
-    else:
-        bare_host = host.rstrip("/")
-        url = f"ws://{bare_host}/ws/i2c"
-
-    origin = f"http://{bare_host}"
+    url, origin = picotools_urls(host)
+    if auto_setup:
+        start_picotools_sniffer(origin, timeout, debug)
     print(f"# PicoXTools WebSocket: {url}", file=sys.stderr)
     print("# Ctrl+C to stop.", file=sys.stderr)
 
@@ -546,7 +598,7 @@ def iter_picotools_frames(host: str, timeout: float, debug: bool) -> Iterator[Fr
             except websocket.WebSocketTimeoutException:
                 continue
 
-            if msg is None:
+            if msg is None or msg == "" or msg == b"":
                 break
 
             if isinstance(msg, str):
@@ -1363,6 +1415,11 @@ def build_argparser() -> argparse.ArgumentParser:
         metavar="HOST",
         help="Connect directly to PicoXTools WebSocket (default: 192.168.33.1).",
     )
+    p.add_argument(
+        "--no-picotools-setup",
+        action="store_true",
+        help="Skip automatic I2C Sniffer setup; use the device's existing configuration.",
+    )
 
     p.add_argument("--baud", type=int, default=115200, help="Serial baud (default 115200).")
     p.add_argument("--timeout", type=float, default=1.0, help="Socket/serial timeout seconds.")
@@ -1593,7 +1650,10 @@ def main() -> int:
                             emit_set(summary)
 
             if args.picotools:
-                for frame in iter_picotools_frames(args.picotools, args.timeout, args.ws_debug):
+                for frame in iter_picotools_frames(
+                    args.picotools, args.timeout, args.ws_debug,
+                    auto_setup=not args.no_picotools_setup,
+                ):
                     consume_frame(frame)
 
             elif args.port:
