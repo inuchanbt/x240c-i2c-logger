@@ -27,4 +27,18 @@ After setup succeeds, the logger connects to `/ws/i2c` (or the explicitly suppli
 
 Automated tests use a local HTTP server and a simulated WebSocket to verify the exact setup request, ordering before capture, binary decoding, failure handling, and opt-out behavior. Existing v0.4.4 SET regression tests also apply.
 
-At implementation time, the user's device at `192.168.33.1` was unreachable. The startup API is supported by the inspected 3.3.1 web UI, but capture on the user's installed firmware has not yet been verified. To verify, start with Sniffer disabled in the web UI, run `py x240c_i2c_logger.py --picotools`, generate normal target I2C traffic, and confirm that the transaction CSV contains captured rows.
+On 2026-10-02, the user confirmed automatic startup and live capture on their PicoXTools at `192.168.33.1` without operating the settings page, using:
+
+```powershell
+py x240c_i2c_logger.py --picotools --ws-debug
+```
+
+The supplied console log showed:
+
+- Setup response: `{"result": 0, "sniffer": 0}`.
+- 12 decoded transactions, all at `0x6C`, with `flagged=0`.
+- Current-setting writes, DCDC enable/disable writes, and repeated-START reads of registers `0x11` and `0x16`.
+- Correct reconstruction of transactions split across multiple WebSocket messages.
+- A clean stop with `Ctrl+C` and both transaction and SET CSV output paths reported.
+
+The run contained no OTG voltage-setting writes, so `voltage-change sets=0` is expected. The device's installed firmware version was not reported; this confirms compatibility with that device rather than all PicoXTools firmware versions.

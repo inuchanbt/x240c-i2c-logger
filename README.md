@@ -141,7 +141,7 @@ py tests/test_picotools_setup.py
 py x240c_i2c_logger.py --help
 ```
 
-The setup tests use a local HTTP server and simulated WebSocket data to check startup order, failure handling, and manual-setup mode. Hardware capture still needs verification on the connected device.
+The setup tests use a local HTTP server and simulated WebSocket data to check startup order, failure handling, and manual-setup mode. Automatic startup and live capture were confirmed on the user's PicoXTools on 2026-10-02: 12 transactions at `0x6C`, zero flagged transactions, and both CSV output paths reported. See the [hardware verification notes](docs/picotools-auto-setup.md#verification).
 
 The regression tests cover SET boundaries across repeated STARTs, prevention of incorrect current association across separate transactions, and aggregation of delayed DCDC-related operations.
 
